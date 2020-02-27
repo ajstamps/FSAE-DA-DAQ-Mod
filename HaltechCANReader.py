@@ -1,13 +1,13 @@
-from can import *
 import os
 from threading import Thread
 import time
+from can import *
 
 
 class CANBusReader:
     def __init__(self):
         # This sets up the channel for the can hat to read from
-        # os.system("sudo /sbin/ip link set can0 up type can bitrate 500000")
+        os.system("sudo /sbin/ip link set can0 up type can bitrate 500000")
 
         # USED FOR TESTING #
         # os.system("sudo modprobe vcan")
@@ -15,20 +15,25 @@ class CANBusReader:
         # os.system("sudo ip link set up vcan0")
 
         # This sets up the reader itself
-        self.bus = interface.Bus(channel='can0', bustype='socketcan_native')
+        can_interface = 'can0'
+        self.bus = interface.Bus(can_interface, interface='socketcan')
 
         self.file = str(time.strftime("%Y-%m-%d-%H-%M-%S")) + ".csv"
 
-        self.csv_writer = CSVWriter(self.file)
+        self.quit = False
 
         self.thread = Thread(target=self.on_message_received, daemon=True)
         self.thread.start()
 
     def on_message_received(self):
-        while True:
-            msg = self.bus.recv()
-
+        with CSVWriter(self.file) as csv_writer:
             try:
-                self.csv_writer.on_message_received(msg)
-            except IndexError:
-                print(int(msg.arbitration_id, 16))
+                while True:
+                    msg = self.bus.recv(1)
+                    if msg is not None:
+                        csv_writer.on_message_received(msg)
+                    else:
+                        print("Check your wiring! No CAN message received in 1 second! (WHICH AIN'T RIGHT!)")
+
+            except KeyboardInterrupt:
+                pass  # exit normally, happens from time to time

@@ -1,17 +1,8 @@
-#!/usr/bin/python3
-# GPS logger example
-# For use with PiCAN-GPS board
-# http://skpang.co.uk/catalog/pican-with-gps-canbus-board-for-raspberry-pi-23-p-1520.html
-#
-# Serial and GPS routine writern by David Whale
-#
-# SK Pang 15th March 2017
-#
-#
+
 
 import time
 import serial
-import geojson
+import json
 
 PORT = "/dev/ttyS0"
 BAUD = 9600
