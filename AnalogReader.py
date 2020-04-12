@@ -3,28 +3,40 @@ import digitalio
 import board
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
-from time import sleep
+from threading import Thread
 
-# create the spi bus
-spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
+class AnalogReader:
+    def __init__(self, file_and_path_name):
+        self.spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
+        self.cs = digitalio.DigitalInOut(board.CE1)
+        self.mcp = MCP.MCP3008(self.spi, self.cs)
 
-# create the cs (chip select)
-cs = digitalio.DigitalInOut(board.CE1)
+        self.file_path_and_name = file_and_path_name
 
-# create the mcp object
-mcp = MCP.MCP3008(spi, cs)
+        self.pin1 = AnalogIn(self.mcp, MCP.P0)
+        self.pin2 = AnalogIn(self.mcp, MCP.P1)
+        self.pin3 = AnalogIn(self.mcp, MCP.P2)
+        self.pin4 = AnalogIn(self.mcp, MCP.P3)
+        self.pin5 = AnalogIn(self.mcp, MCP.P4)
+        self.pin6 = AnalogIn(self.mcp, MCP.P5)
+        self.pin7 = AnalogIn(self.mcp, MCP.P6)
+        self.pin8 = AnalogIn(self.mcp, MCP.P7)
 
-# create an analog input channel on pin 0
-pin1 = AnalogIn(mcp, MCP.P0)
-pin2 = AnalogIn(mcp, MCP.P1)
-pin3 = AnalogIn(mcp, MCP.P2)
-pin4 = AnalogIn(mcp, MCP.P3)
-pin5 = AnalogIn(mcp, MCP.P4)
-pin6 = AnalogIn(mcp, MCP.P5)
-pin7 = AnalogIn(mcp, MCP.P6)
-pin8 = AnalogIn(mcp, MCP.P7)
+        self.outfile = open(self.file_path_and_name, 'w')
 
-while True:
-    print('Raw ADC Value: ', chan.value)
-    print('ADC Voltage: ' + str(chan.voltage) + 'V')
-    sleep(0.1)
+        self.thread = Thread(target=self.read, daemon=True)
+
+    def read(self):
+        while True:
+            self.print_csv([self.pin1.value, self.pin2.value,
+                            self.pin3.value, self.pin4.value,
+                            self.pin5.value, self.pin5.value,
+                            self.pin6.value, self.pin8.value])
+
+    def print_csv(self, values):
+        line = ""
+        for v in values:
+            if line != "":
+                line += ','
+            line += str(v)
+        print(line, file=self.outfile)  # Save data to file

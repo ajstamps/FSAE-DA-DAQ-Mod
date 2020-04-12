@@ -20,13 +20,11 @@ class CANBusReader:
 
         self.file = str(time.strftime("%Y-%m-%d-%H-%M-%S")) + ".csv"
 
-        self.quit = False
-
         self.thread = Thread(target=self.on_message_received, daemon=True)
         self.thread.start()
 
     def on_message_received(self):
-        with CSVWriter(self.file) as csv_writer:
+        with SqliteWriter(self.file) as csv_writer:
             try:
                 while True:
                     msg = self.bus.recv(1)

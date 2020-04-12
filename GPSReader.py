@@ -1,8 +1,6 @@
-
-
 import time
 import serial
-import json
+from threading import Thread
 
 PORT = "/dev/ttyS0"
 BAUD = 9600
@@ -17,151 +15,140 @@ s.timeout = 0  # non blocking mode
 s.close()
 s.port = PORT
 s.open()
-outfile = open('log.txt', 'w')
 
 # ----- SERIAL PORT READ AND WRITE ENGINE --------------------------------------
 line_buffer = ""
 rec_buffer = None
 
 
-def read_waiting():
-    """Poll the serial and fill up rec_buffer if something comes in"""
-    global rec_buffer
-    if rec_buffer is not None:
-        return True
+class GPSReader:
+    def __init__(self, file_path_and_name):
+        self.REPORT_RATE = 0.1
+        self.date = ""
+        self.thread = Thread(target=self.log, daemon=True)
+        self.file_path_and_name = file_path_and_name
 
-    line = process_serial()
-    if line is not None:
-        rec_buffer = line
-        return True
+        self.outfile = open(self.file_path_and_name, 'w')
 
-    return False
+        self.locked = False
+        self.next_report = time.time() + self.REPORT_RATE
+        self.date, self.timestamp, self.northing, self.northing_flag, self.easting, self.easting_flag = "", "", "", "", "", ""
 
+    def read_waiting(self):
+        """Poll the serial and fill up rec_buffer if something comes in"""
+        global rec_buffer
+        if rec_buffer is not None:
+            return True
 
-def read():
-    """Poll the rec_buffer and remove next line from it if there is a line in it"""
-    global rec_buffer
+        line = self.process_serial()
+        if line is not None:
+            rec_buffer = line
+            return True
 
-    if not read_waiting():
-        return None
+        return False
 
-    rec = rec_buffer
-    rec_buffer = None
-    # print("read:" + rec)
-    return rec
+    def read(self):
+        """Poll the rec_buffer and remove next line from it if there is a line in it"""
+        global rec_buffer
 
+        if not self.read_waiting():
+            return None
 
-def process_serial():
-    """Low level serial poll function"""
-    global line_buffer
+        rec = rec_buffer
+        # print("read:" + rec)
+        return rec
 
-    while True:
-        data = s.read(1)
-        data = data.decode('utf-8')
-        # print(data, type(data), len(data))
+    def process_serial(self):
+        """Low level serial poll function"""
+        global line_buffer
 
-        if len(data) == 0:
-            # print("RETURN NONE")
-            return None  # no new data has been received
-        data = data[0]
+        while True:
+            data = s.read(1)
+            data = data.decode('utf-8')
 
-        if data == '\r':
-            # print("RETURN ")
-            pass  # strip newline
+            if len(data) == 0:
+                return None  # no new data has been received
+            data = data[0]
 
-        elif data == '\n':
-            # print("NEWLINE ")
-            line = line_buffer
-            line_buffer = ""
-            # print(line)
-            return line
+            if data == '\r':
+                pass  # strip newline
 
-        else:
-            # print("ADD %s" % data)
-            line_buffer += data
+            elif data == '\n':
+                line = line_buffer
+                line_buffer = ""
+                return line
 
+            else:
+                line_buffer += data
 
-# ----- ADAPTOR ----------------------------------------------------------------
+    # ----- ADAPTOR ----------------------------------------------------------------
 
-# This is here, so you can change the concurrency and blocking model,
-# independently of the underlying code, to adapt to how your app wants
-# to interact with the serial port.
+    # This is here, so you can change the concurrency and blocking model,
+    # independently of the underlying code, to adapt to how your app wants
+    # to interact with the serial port.
 
-# NOTE: This is configured for non blocking send and receive, but no threading
-# and no callback handling.
+    # NOTE: This is configured for non blocking send and receive, but no threading
+    # and no callback handling.
 
-def send_message(msg):
-    """Send a message to the micro:bit.
-        It is the callers responsibility to add newlines if you want them.
-    """
-    ##print("Sending:%s" % msg)
+    def send_message(self, msg):
+        """Send a message to the micro:bit.
+            It is the callers responsibility to add newlines if you want them.
+        """
+        s.write(msg)
 
-    s.write(msg)
+    def get_next_message(self):
+        """Receive a single line of text from the micro:bit.
+            Newline characters are pre-stripped from the end.
+            If there is not a complete line waiting, returns None.
+            Call this regularly to 'pump' the receive engine.
+        """
+        result = self.read()
+        return result
 
+    def print_csv(self, values):
+        line = ""
+        for v in values:
+            if line != "":
+                line += ','
+            line += str(v)
+        print(line, file=self.outfile)  # Save data to file
 
-def get_next_message():
-    """Receive a single line of text from the micro:bit.
-        Newline characters are pre-stripped from the end.
-        If there is not a complete line waiting, returns None.
-        Call this regularly to 'pump' the receive engine.
-    """
-    result = read()
-    return result
+    def log(self):
+        try:
+            while True:
+                now = time.time()
 
+                if now > self.next_report:
+                    self.next_report = now + self.REPORT_RATE
+                    values = self.date, self.timestamp, self.locked, self.northing, \
+                             self.northing_flag, self.easting, self.easting_flag
 
-def print_csv(values):
-    line = ""
-    for v in values:
-        if line != "":
-            line += ','
-        line += str(v)
-    print(line, file=outfile)  # Save data to file
-    # log_file.write(line + '\n')
-    # log_file.flush()
-    print(line)
+                    self.print_csv(values)
 
+                gps_data = self.get_next_message()
+                if gps_data is not None:
+                    parts = gps_data.split(',')
+                    rec_type = parts[0]
+                    if rec_type == "$GPRMC":
+                        date = parts[9]
+                    if rec_type == "$GPGSA":
+                        lock_flag = parts[1]
+                        if lock_flag == 'A':
+                            # print("GPS LOCKED")
+                            locked = True
+                        else:
+                            # print("NO GPS LOCK:%s" % lock_flag)
+                            locked = False
 
-REPORT_RATE = 0.1
-date = ""
+                    elif rec_type == "$GPGGA":
+                        if locked:
+                            self.timestamp, self.northing, self.northing_flag, self.easting, self.easting_flag = parts[
+                                                                                                                 1:6]
+                        else:
+                            self.timestamp, self.northing, self.northing_flag, self.easting, self.easting_flag = "", "", "", "", ""
 
-next_report = time.time() + REPORT_RATE
-
-locked = False
-date, timestamp, northing, northing_flag, easting, easting_flag = "", "", "", "", "", ""
-
-try:
-    while True:
-        now = time.time()
-
-        if now > next_report:
-            next_report = now + REPORT_RATE
-            values = date, timestamp, locked, northing, northing_flag, easting, easting_flag
-            print_csv(values)
-
-        gps_data = get_next_message()
-        if gps_data is not None:
-            parts = gps_data.split(',')
-            rec_type = parts[0]
-            if rec_type == "$GPRMC":
-                date = parts[9]
-                # print(date)
-            if rec_type == "$GPGSA":
-                lock_flag = parts[1]
-                if lock_flag == 'A':
-                    # print("GPS LOCKED")
-                    locked = True
-                else:
-                    # print("NO GPS LOCK:%s" % lock_flag)
-                    locked = False
-
-            elif rec_type == "$GPGGA":
-                if locked:
-                    timestamp, northing, northing_flag, easting, easting_flag = parts[1:6]
-                else:
-                    timestamp, northing, northing_flag, easting, easting_flag = "", "", "", "", ""
-
-except KeyboardInterrupt:
-    # Catch keyboard interrupt
-    outfile.close()
-    # os.system("sudo /sbin/ip link set can0 down")
-    print('\n\rKeyboard interrupt')
+        except KeyboardInterrupt:
+            # Catch keyboard interrupt
+            self.outfile.close()
+            # os.system("sudo /sbin/ip link set can0 down")
+            print('\n\rKeyboard interrupt')
