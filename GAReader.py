@@ -1,12 +1,14 @@
 #!/usr/bin/python3
 import math
 import time
-
+from threading import Thread
 import smbus
+import logging
 
 # Power management registers
 power_mgmt_1 = 0x6b
 power_mgmt_2 = 0x6c
+
 
 class GAReader:
     def __init__(self, file_path_and_name):
@@ -21,7 +23,10 @@ class GAReader:
         self.bus.write_byte_data(self.address, self.INT_ENABLE, 0x01)
 
         self.file_path_and_name = file_path_and_name
-        self.outfile = open(self.file_path_and_name, 'w')
+        self.outfile = open(self.file_path_and_name, 'a')
+        self.outfile.flush()
+
+        self.thread = Thread(target=self.recv, daemon=True)
 
     def read_byte(self, adr):
         return self.bus.read_byte_data(self.address, adr)
@@ -53,33 +58,60 @@ class GAReader:
         radians = math.atan2(y, GAReader.dist(x, z))
         return math.degrees(radians)
 
+    @staticmethod
+    def get_z_rotation(x, y, z):
+        # yaw = 180 * math.atan(z / math.sqrt(x * x + z * z)) / math.pi
+        radians = math.atan2(z, GAReader.dist(x, y))
+        return math.degrees(radians)
+
     def print_csv(self, values):
         line = ""
         for v in values:
             if line != "":
                 line += ','
             line += str(v)
-        print(line, file=self.outfile)  # Save data to file
+        line += '\n'
+        self.outfile.write(line)
 
     def recv(self):
-        while True:
-            time.sleep(0.1)
-            gyro_xout = self.read_word_2c(0x43)
-            gyro_yout = self.read_word_2c(0x45)
-            gyro_zout = self.read_word_2c(0x47)
-            print("gyro_xout : ", gyro_xout, " scaled: ", (gyro_xout / 131))
-            print("gyro_yout : ", gyro_yout, " scaled: ", (gyro_yout / 131))
-            print("gyro_zout : ", gyro_zout, " scaled: ", (gyro_zout / 131))
+        try:
+            self.print_csv(["gyro_xout_scaled", "gyro_yout_scaled", "gyro_zout_scaled",
+                            "accel_xout_scaled", "accel_yout_scaled", "accel_zout_scaled",
+                            "x_rot", "y_rot", "z_rot"])
+            while True:
+                # Grab the gyroscope values
+                gyro_xout = self.read_word_2c(0x43)
+                gyro_yout = self.read_word_2c(0x45)
+                gyro_zout = self.read_word_2c(0x47)
 
-            accel_xout = self.read_word_2c(0x3b)
-            accel_yout = self.read_word_2c(0x3d)
-            accel_zout = self.read_word_2c(0x3f)
-            accel_xout_scaled = accel_xout / 16384.0
-            accel_yout_scaled = accel_yout / 16384.0
-            accel_zout_scaled = accel_zout / 16384.0
-            print("accel_xout: ", accel_xout, " scaled: ", accel_xout_scaled)
-            print("accel_yout: ", accel_yout, " scaled: ", accel_yout_scaled)
-            print("accel_zout: ", accel_zout, " scaled: ", accel_zout_scaled)
-            print("x rotation: ", self.get_x_rotation(accel_xout_scaled, accel_yout_scaled, accel_zout_scaled))
-            print("y rotation: ", self.get_y_rotation(accel_xout_scaled, accel_yout_scaled, accel_zout_scaled))
-            time.sleep(0.5)
+                # Scale them properly
+                gyro_xout_scaled = round(gyro_xout / 131, 2)
+                gyro_yout_scaled = round(gyro_yout / 131, 2)
+                gyro_zout_scaled = round(gyro_zout / 131, 2)
+
+                # Grab accelerometer data
+                accel_xout = self.read_word_2c(0x3b)
+                accel_yout = self.read_word_2c(0x3d)
+                accel_zout = self.read_word_2c(0x3f)
+
+                # Scale
+                accel_xout_scaled = round(accel_xout / 16384.0, 2)
+                accel_yout_scaled = round(accel_yout / 16384.0, 2)
+                accel_zout_scaled = round(accel_zout / 16384.0, 2)
+
+                # Get the rotation
+                x_rot = round(self.get_x_rotation(accel_xout_scaled, accel_yout_scaled, accel_zout_scaled), 2)
+                y_rot = round(self.get_y_rotation(accel_xout_scaled, accel_yout_scaled, accel_zout_scaled), 2)
+                z_rot = round(self.get_z_rotation(accel_xout_scaled, accel_yout_scaled, accel_zout_scaled), 2)
+
+                # Output to CSV file
+                self.print_csv([gyro_xout_scaled, gyro_yout_scaled, gyro_zout_scaled,
+                                accel_xout_scaled, accel_yout_scaled, accel_zout_scaled,
+                                x_rot, y_rot, z_rot])
+                self.outfile.flush()
+                time.sleep(0.01)
+        except Exception as e:
+            logging.error("Exception occurred", exc_info=True)
+
+    def start_thread(self):
+        self.thread.start()

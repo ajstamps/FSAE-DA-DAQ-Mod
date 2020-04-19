@@ -4,6 +4,9 @@ import board
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
 from threading import Thread
+import logging
+import time
+
 
 class AnalogReader:
     def __init__(self, file_and_path_name):
@@ -22,16 +25,9 @@ class AnalogReader:
         self.pin7 = AnalogIn(self.mcp, MCP.P6)
         self.pin8 = AnalogIn(self.mcp, MCP.P7)
 
-        self.outfile = open(self.file_path_and_name, 'w')
+        self.outfile = open(self.file_path_and_name, 'a')
 
         self.thread = Thread(target=self.read, daemon=True)
-
-    def read(self):
-        while True:
-            self.print_csv([self.pin1.value, self.pin2.value,
-                            self.pin3.value, self.pin4.value,
-                            self.pin5.value, self.pin5.value,
-                            self.pin6.value, self.pin8.value])
 
     def print_csv(self, values):
         line = ""
@@ -39,4 +35,20 @@ class AnalogReader:
             if line != "":
                 line += ','
             line += str(v)
-        print(line, file=self.outfile)  # Save data to file
+        self.outfile.write(line)
+
+    def read(self):
+        self.print_csv(["timestamp", "AVI1", "AVI2",
+                        "AVI3", "AVI4", "AVI5",
+                        "AVI6", "AVI7", "AVI8"])
+        try:
+            while True:
+                self.print_csv([time.time(), self.pin1.voltage, self.pin2.voltage,
+                                self.pin3.voltage, self.pin4.voltage, self.pin5.voltage,
+                                self.pin5.voltage, self.pin6.voltage, self.pin8.voltage])
+                self.outfile.flush()
+        except Exception as e:
+            logging.error("Error Occurred", exc_info=True)
+
+    def start_thread(self):
+        self.thread.start()
